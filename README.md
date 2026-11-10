@@ -1,90 +1,88 @@
-# 鼠标右键返回键（Right Click = Back）
+# 鼠标右键返回键（Magisk 模块）
 
-给 Android TV / 电视盒子用的 Magisk 模块：**把鼠标右键全局映射成返回键**。
+把**鼠标右键**映射成**返回键**，桌面、系统界面、任意 App 全局生效 —— 不依赖 LSPosed 作用域，不需要逐个 App 勾选。
 
-不需要 LSPosed、不需要勾选任何 App 作用域，装完重启即可 —— 桌面、系统界面、任意 App 里点一下鼠标右键就等于按了一次返回键。
-
-## 适用场景
-
-很多电视盒子/盒子固件上，鼠标右键默认什么都不做，而返回只能靠遥控器或鼠标侧键。如果你的鼠标没有侧键，盒子上就没法返回上一级。这个模块把右键变成返回键，一只普通鼠标就能完整操作盒子。
+适用于鼠标没有侧键、或侧键在当前系统上不起作用的 Android TV 盒子 / 手机 / 平板。已在 Amlogic S905L3A（Android 12）真机盒子与 Android 14 模拟器上实测。
 
 ## 原理
 
-```
-鼠标右键 BTN_RIGHT(273)  →  getevent 监听 /dev/input/event*
-        ↓
-向内置按键设备 aml_keypad 注入 KEY_BACK(158) 按下 + 抬起
-        ↓
-系统 InputReader 翻译成 KEYCODE_BACK(4)，投递给当前前台窗口
-```
+`getevent -l` 读内核输入层，捕获鼠标右键 `BTN_RIGHT`(273) 按下 → 向「支持 `KEY_BACK` 的内置按键设备」注入 `KEY_BACK`(158) 按下+抬起 → 系统 InputReader 翻译成 `KEYCODE_BACK`(4) 交给当前前台窗口。
 
-全程在输入层完成，不修改系统框架、不依赖任何注入框架，所以对任何 App 都生效，也不存在开机循环（bootloop）风险。
+因为发生在输入层，不针对任何 App，所以是真正全局的：桌面、系统设置、任何第三方 App 都生效。
 
-## 为什么不用 LSPosed
-
-LSPosed 是按进程注入：一个模块只会注入到你勾选作用域里的 App，做不到"一次配置吃全局"，新装 App 还得补勾。
-要真正全局只有两条路：
-
-| 方案 | 全局性 | 风险 |
-|---|---|---|
-| Hook 系统框架（`android` 作用域拦输入） | 全局 | 高，改错会开机循环 |
-| **输入层重映射（本模块）** | 全局 | 低，纯脚本，删掉即恢复 |
+为什么不走 LSPosed：LSPosed 是按进程注入，模块只注入到作用域里勾选的 App，一个模块吃不到全局（新装 App 还要补勾）；改系统框架又有 bootloop 风险。
 
 ## 安装
 
-### 方式一：Magisk 刷入（推荐）
-
-1. 下载 [Releases](../../releases) 里的 `rightback_v1.1.zip`
-2. 打开 Magisk App → 模块 → 从本地安装 → 选这个 zip
+**方式一：Magisk App 本地安装**
+1. 下载 Release 里的 `rightback_v1.5.zip`
+2. Magisk App → 模块 → 从本地安装 → 选择该 zip
 3. 重启
 
-### 方式二：手动放置
-
+**方式二：命令行**
 ```sh
-adb push module.prop service.sh rightback.sh /data/local/tmp/
-adb shell su -c "mkdir -p /data/adb/modules/rightback && \
-  cp /data/local/tmp/{module.prop,service.sh,rightback.sh} /data/adb/modules/rightback/ && \
-  chmod 755 /data/adb/modules/rightback/*.sh"
-# 重启，或立刻生效：
-adb shell su -c "sh /data/adb/modules/rightback/service.sh"
+adb push rightback_v1.5.zip /data/local/tmp/
+adb shell su -c "magisk --install-module /data/local/tmp/rightback_v1.5.zip"
+# 重启生效
 ```
 
-## 使用与排查
+安装后模块目录为 `/data/adb/modules/rightback`，由 `service.sh` 在开机阶段自动启动，不阻塞开机。
+
+## 验证
 
 ```sh
-# 看日志：每次右键命中都会记录一条
+# 实时看日志，每次右键会记录一条
 adb shell su -c "tail -f /data/local/tmp/rightback.log"
+```
 
-# 临时停用（重启后会自动恢复）
-adb shell su -c "pkill -f rightback.sh"
+正常情况下打开任意界面点右键，日志出现：
 
-# 手动重启守护进程
-adb shell su -c "sh /data/adb/modules/rightback/service.sh"
+```
+[rightback] 观察到 BTN_RIGHT 来自 /dev/input/eventX
+[rightback] BTN_RIGHT -> 返回
+```
 
-# 彻底卸载（删目录后重启）
+## 切换触发键（可选）
+
+`/data/adb/modules/rightback/trigger.conf` 一行文本，改完重启守护进程即可：
+
+| 想映射的键 | trigger.conf 内容 |
+|---|---|
+| 鼠标右键（默认） | `BTN_RIGHT` |
+| 鼠标侧键（前/后） | `BTN_SIDE BTN_EXTRA` |
+| 都要 | `BTN_RIGHT BTN_SIDE BTN_EXTRA` |
+
+```sh
+adb shell su -c "echo 'BTN_RIGHT BTN_SIDE BTN_EXTRA' > /data/adb/modules/rightback/trigger.conf"
+adb shell su -c "pkill -f /data/adb/modules/rightback/rightback.sh; sh /data/adb/modules/rightback/service.sh"
+```
+
+## 常见问题
+
+**Magisk 安装时报 `! Unzip error`**
+说明用的 zip 打包方式不标准。本仓库 v1.5 的 zip 用 bsdtar 打包并带官方模板 `META-INF/com/google/android/{update-binary,updater-script}`，可正常安装。自己改包时别用 Windows 的 `Compress-Archive` —— 打出来的包 Magisk 解不出成员，必然报这个错。
+
+**按键按了没反应**
+先看日志有没有 `观察到 ...` 这一行：
+- 有 `观察到` 但没有 `-> 返回`：注入设备可能不认 `KEY_BACK`，看日志里的 `注入设备` 那台设备。
+- 完全没有 `观察到`：说明系统根本没收到这个键。常见于模拟器 / 云手机 / 远程桌面把鼠标按键自己吃掉了，或者该设备的能力位里没有这个键（例如宿主只声明 `BTN_LEFT/BTN_RIGHT/BTN_MIDDLE`，侧键根本不会下发）。这种情况模块无能为力。
+
+**注入设备是怎么选的**
+按 `KEY_BACK` 能力位自动探测，优先名字含 `keypad/gpio/keyboard/rcu/input` 的设备（电视盒子会选中 `aml_keypad`），找不到则回退 `input keyevent 4`。所以重启后 `/dev/input/eventN` 编号变化不影响使用。
+
+## 卸载
+
+```sh
 adb shell su -c "rm -rf /data/adb/modules/rightback"
+# 重启
 ```
-
-日志正常长这样：
-
-```
-[rightback] 启动，KEY_BACK 注入设备 = /dev/input/event0
-[rightback] 开始监听右键(BTN_RIGHT)
-[rightback] 右键 -> 返回
-```
-
-## 兼容性
-
-- 在 Amlogic S905L3A / Android 12 盒子上实测通过（重启后自动生效、系统设置界面点右键即返回）
-- 注入设备按名字 `aml_keypad` 自动探测，重启后输入节点编号变化（event0/event5/event6 乱跳）不影响使用
-- 只要系统里有内置按键设备（几乎所有盒子都有），就能用；`getevent` 是 Android 自带 toybox 命令，无需额外依赖
+或在 Magisk App 的模块页里直接移除并重启。
 
 ## 已知限制
 
-- 右键事件本身仍会传给应用：极少数自带右键菜单的 App 可能出现"弹菜单 + 同时返回"的双动作
-- 鼠标热插拔后，新插入的设备不在已启动的监听列表里，重启一次即可恢复
-- 需要 Magisk / KernelSU 等 root 环境（要读写 `/dev/input` 与 `/data/adb`）
+- 右键事件本身仍会传给应用，极少数自带右键菜单的 App 可能出现"弹菜单 + 同时返回"。
+- 鼠标热插拔后监听会自行重连（脚本内置 `getevent` 退出后 2 秒重连）。
 
-## 许可
+## 许可证
 
-MIT
+MIT，见 [LICENSE](LICENSE)。
